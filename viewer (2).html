@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Live RAG Chat Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Highlight.js style (GitHub theme) -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #0078d4;
+      --user: #e3f2fd;
+      --assistant: #f3e8ff;
+      --system: #fef9c3;
+      --border: #e5e7eb;
+    }
+    body {
+      font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1rem;
+    }
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: .75rem;
+      margin: 0 auto 1rem;
+      max-width: 920px;
+      padding: 0 .5rem;
+    }
+    header h1 { color: var(--accent); font-size: 1.4rem; margin: 0; }
+    header .meta { color: var(--muted); font-size: .9rem; }
+
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.04);
+      overflow: hidden;
+    }
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #fafafa;
+      border-bottom: 1px solid var(--border);
+      padding: .5rem .75rem;
+    }
+    .toolbar .status { color: var(--muted); font-size: .9rem; }
+    .toolbar button {
+      background: var(--accent);
+      color: white; border: none; border-radius: 6px;
+      padding: .4rem .7rem; cursor: pointer; font-weight: 600;
+    }
+
+    .messages { padding: .5rem; }
+    .msg {
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      gap: .75rem;
+      padding: .8rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .msg:last-child { border-bottom: none; }
+    .role {
+      text-transform: uppercase;
+      font-size: .8rem;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .bubble {
+      padding: .8rem .9rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      overflow-x: auto;
+    }
+    .msg.user   .bubble { background: var(--user); }
+    .msg.assistant .bubble { background: var(--assistant); }
+    .msg.system .bubble { background: var(--system); }
+    .timestamp {
+      margin-top: .4rem;
+      font-size: .8rem;
+      color: var(--muted);
+    }
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: #fafafa;
+      border: 1px solid var(--border);
+      padding: .6rem .7rem;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    p { margin: .3rem 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Live RAG Chat Viewer</h1>
+    <div class="meta">Auto-refreshing every 3s</div>
+  </header>
+
+  <div class="container">
+    <div class="toolbar">
+      <div class="status" id="status">Waiting for data…</div>
+      <button id="refreshBtn">Refresh now</button>
+    </div>
+    <div class="messages" id="messages"></div>
+  </div>
+
+  <!-- Highlight.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>
+    // Escape HTML to avoid injection
+    function escapeHtml(s) {
+      return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    // Convert simple Markdown-style code fences to <pre><code> blocks with optional language
+    function renderContentWithCodeFences(text) {
+      if (!text) return "";
+      const parts = [];
+      let lastIndex = 0;
+      const fence = /```(\w+)?\n([\s\S]*?)```/g;
+      let match;
+
+      while ((match = fence.exec(text)) !== null) {
+        const [full, lang, code] = match;
+        const start = match.index;
+
+        // Plain text before the code block
+        const before = text.slice(lastIndex, start);
+        if (before) {
+          parts.push("<p>" + escapeHtml(before).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>") + "</p>");
+        }
+
+        // Code block
+        const languageClass = lang ? `language-${lang.toLowerCase()}` : "";
+        parts.push(`<pre><code class="${languageClass}">${escapeHtml(code)}</code></pre>`);
+
+        lastIndex = start + full.length;
+      }
+
+      // Remainder after last code block
+      const after = text.slice(lastIndex);
+      if (after) {
+        parts.push("<p>" + escapeHtml(after).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>") + "</p>");
+      }
+
+      return parts.join("");
+    }
+
+    function renderMessages(payload) {
+      const container = document.getElementById("messages");
+      const status = document.getElementById("status");
+      container.innerHTML = "";
+
+      const messages = payload?.messages || [];
+      const lastUpdated = payload?.last_updated || "";
+
+      status.textContent = messages.length
+        ? `Messages: ${messages.length} • Last updated: ${lastUpdated}`
+        : "No messages found in output.json";
+
+      messages.forEach((m, idx) => {
+        const role = (m.role || "unknown").toLowerCase();
+        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content, null, 2);
+
+        const row = document.createElement("div");
+        row.className = `msg ${role}`;
+
+        const roleEl = document.createElement("div");
+        roleEl.className = "role";
+        roleEl.textContent = role;
+
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        bubble.innerHTML = renderContentWithCodeFences(content);
+
+        const ts = document.createElement("div");
+        ts.className = "timestamp";
+        ts.textContent = `#${idx + 1}`;
+
+        const right = document.createElement("div");
+        right.appendChild(bubble);
+        right.appendChild(ts);
+
+        row.appendChild(roleEl);
+        row.appendChild(right);
+        container.appendChild(row);
+      });
+
+      // Apply syntax highlighting
+      document.querySelectorAll('pre code').forEach(block => {
+        hljs.highlightElement(block);
+      });
+    }
+
+    let lastSerialized = null;
+
+    async function fetchAndRender() {
+      try {
+        const res = await fetch("output.json", { cache: "no-cache" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const serialized = JSON.stringify(data);
+        if (serialized !== lastSerialized) {
+          lastSerialized = serialized;
+          renderMessages(data);
+        } else {
+          document.getElementById("status").textContent += " • (no changes)";
+        }
+      } catch (e) {
+        document.getElementById("status").textContent = "Unable to load output.json";
+        console.error(e);
+      }
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", fetchAndRender);
+
+    // Initial load + auto-refresh every 3 seconds
+    fetchAndRender();
+    setInterval(fetchAndRender, 3000);
+  </script>
+</body>
+</html>
