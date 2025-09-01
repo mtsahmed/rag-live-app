@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <title>Live RAG Chat Viewer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Highlight.js style (GitHub theme) -->
   <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
   <style>
@@ -34,7 +33,7 @@
       max-width: 920px;
       padding: 0 .5rem;
     }
-    header h1 { color: var(--accent); font-size: 1.4rem; margin: 0; }
+    header h1 { color: var(--accent); font-size: 1.6rem; margin: 0; font-weight: 700; }
     header .meta { color: var(--muted); font-size: .9rem; }
 
     .container {
@@ -102,6 +101,11 @@
     }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     p { margin: .3rem 0; }
+    h1 { font-size: 1.4rem; font-weight: bold; margin: .5rem 0; }
+    h2 { font-size: 1.2rem; font-weight: bold; margin: .4rem 0; }
+    strong { font-weight: bold; }
+    em { font-style: italic; }
+    ul { margin: .4rem 0 .4rem 1.2rem; }
   </style>
 </head>
 <body>
@@ -118,10 +122,8 @@
     <div class="messages" id="messages"></div>
   </div>
 
-  <!-- Highlight.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script>
-    // Escape HTML to avoid injection
     function escapeHtml(s) {
       return s
         .replace(/&/g, "&amp;")
@@ -131,9 +133,10 @@
         .replace(/'/g, "&#39;");
     }
 
-    // Convert simple Markdown-style code fences to <pre><code> blocks with optional language
-    function renderContentWithCodeFences(text) {
+    function renderContentWithFormatting(text) {
       if (!text) return "";
+
+      // Handle code fences first
       const parts = [];
       let lastIndex = 0;
       const fence = /```(\w+)?\n([\s\S]*?)```/g;
@@ -142,27 +145,38 @@
       while ((match = fence.exec(text)) !== null) {
         const [full, lang, code] = match;
         const start = match.index;
-
-        // Plain text before the code block
         const before = text.slice(lastIndex, start);
-        if (before) {
-          parts.push("<p>" + escapeHtml(before).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>") + "</p>");
-        }
+        if (before) parts.push(formatMarkdown(before));
 
-        // Code block
         const languageClass = lang ? `language-${lang.toLowerCase()}` : "";
         parts.push(`<pre><code class="${languageClass}">${escapeHtml(code)}</code></pre>`);
-
         lastIndex = start + full.length;
       }
 
-      // Remainder after last code block
       const after = text.slice(lastIndex);
-      if (after) {
-        parts.push("<p>" + escapeHtml(after).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>") + "</p>");
-      }
+      if (after) parts.push(formatMarkdown(after));
 
       return parts.join("");
+    }
+
+    function formatMarkdown(str) {
+      let html = escapeHtml(str);
+
+      // Headings
+      html = html.replace(/^### (.*$)/gim, "<h3>$1</h3>");
+      html = html.replace(/^## (.*$)/gim, "<h2>$1</h2>");
+      html = html.replace(/^# (.*$)/gim, "<h1>$1</h1>");
+
+      // Bold & italic
+      html = html.replace(/\*\*(.*?)\*\*/gim, "<strong>$1</strong>");
+      html = html.replace(/\*(.*?)\*/gim, "<em>$1</em>");
+
+      // Lists
+      html = html.replace(/^\s*-\s+(.*$)/gim, "<ul><li>$1</li></ul>");
+
+      // Paragraphs
+      html = html.replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>");
+      return `<p>${html}</p>`;
     }
 
     function renderMessages(payload) {
@@ -190,53 +204,7 @@
 
         const bubble = document.createElement("div");
         bubble.className = "bubble";
-        bubble.innerHTML = renderContentWithCodeFences(content);
+        bubble.innerHTML = renderContentWithFormatting(content);
 
         const ts = document.createElement("div");
-        ts.className = "timestamp";
-        ts.textContent = `#${idx + 1}`;
-
-        const right = document.createElement("div");
-        right.appendChild(bubble);
-        right.appendChild(ts);
-
-        row.appendChild(roleEl);
-        row.appendChild(right);
-        container.appendChild(row);
-      });
-
-      // Apply syntax highlighting
-      document.querySelectorAll('pre code').forEach(block => {
-        hljs.highlightElement(block);
-      });
-    }
-
-    let lastSerialized = null;
-
-    async function fetchAndRender() {
-      try {
-        const res = await fetch("output.json", { cache: "no-cache" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-
-        const serialized = JSON.stringify(data);
-        if (serialized !== lastSerialized) {
-          lastSerialized = serialized;
-          renderMessages(data);
-        } else {
-          document.getElementById("status").textContent += " • (no changes)";
-        }
-      } catch (e) {
-        document.getElementById("status").textContent = "Unable to load output.json";
-        console.error(e);
-      }
-    }
-
-    document.getElementById("refreshBtn").addEventListener("click", fetchAndRender);
-
-    // Initial load + auto-refresh every 3 seconds
-    fetchAndRender();
-    setInterval(fetchAndRender, 3000);
-  </script>
-</body>
-</html>
+        ts.className = "timestamp
